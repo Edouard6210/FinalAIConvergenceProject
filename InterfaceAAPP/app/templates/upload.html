@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload and Analyze</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #a777e3, #6e8efb);
+            color: white;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Arial', sans-serif;
+        }
+        .container {
+            max-width: 800px;
+            width: 100%;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.1);
+        }
+        canvas {
+            margin-top: 20px;
+            max-width: 100%;
+            border-radius: 10px;
+        }
+        .card-title {
+            font-weight: bold;
+            margin-top: 20px;
+        }
+        .list-group-item {
+            font-size: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>Let's Determine the Risks</h1>
+            <p>Upload an image to get the risks. Pay attention, only 1920x1080 images are accepted.</p>
+            <form id="predictForm" action="/predict" method="POST" enctype="multipart/form-data">
+                <div class="mb-3">
+                    <label for="image" class="form-label">Choose Image</label>
+                    <input type="file" class="form-control" id="image" name="image" accept="image/*" required>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Analyze</button>
+            </form>
+            <canvas id="canvasOverlay"></canvas>
+
+            <div class="mt-4">
+                <h3 class="card-title">Predictions</h3>
+                <ul class="list-group" id="predictionsList"></ul>
+            </div>
+
+            <div class="mt-4">
+                <h3 class="card-title">Risks</h3>
+                <ul class="list-group" id="risksList"></ul>
+            </div>
+        </div>
+    </div>
+    <script>
+        const imageInput = document.getElementById('image');
+        const canvasOverlay = document.getElementById('canvasOverlay');
+        const ctx = canvasOverlay.getContext('2d');
+        const predictionsList = document.getElementById('predictionsList');
+        const risksList = document.getElementById('risksList');
+
+        let img = new Image();
+        const colorMap = {}; // Dictionnaire dynamique pour les couleurs par classe
+
+        // Fonction pour générer une couleur aléatoire
+        function generateRandomColor() {
+            const letters = "0123456789ABCDEF";
+            let color = "#";
+            for (let i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+
+        // Prévisualisation de l'image téléchargée
+        imageInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    img.onload = () => {
+                        canvasOverlay.width = img.width;
+                        canvasOverlay.height = img.height;
+                        ctx.clearRect(0, 0, img.width, img.height); // Réinitialiser le canvas
+                        ctx.drawImage(img, 0, 0); // Dessiner l'image d'origine
+                        canvasOverlay.style.display = 'block';
+                    };
+                    img.src = e.target.result; // Charger l'image
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Gestion de l'envoi du formulaire et affichage des résultats
+        document.getElementById('predictForm').onsubmit = async function(event) {
+            event.preventDefault();
+            const formData = new FormData(this);
+            try {
+                const response = await fetch("/predict", { method: "POST", body: formData });
+                if (response.ok) {
+                    const data = await response.json();
+
+                    // Réinitialiser le canvas
+                    ctx.clearRect(0, 0, canvasOverlay.width, canvasOverlay.height);
+                    ctx.drawImage(img, 0, 0); // Dessiner l'image d'origine
+
+                    // Dessiner les annotations
+                    data.predictions.forEach(prediction => {
+                        const [x, y, width, height] = prediction.bbox;
+
+                        // Générer une couleur unique pour chaque classe
+                        if (!colorMap[prediction.class]) {
+                            colorMap[prediction.class] = generateRandomColor();
+                        }
+                        const color = colorMap[prediction.class];
+
+                        ctx.strokeStyle = color;
+                        ctx.lineWidth = 5;
+                        ctx.strokeRect(x, y, width, height); // Dessiner la boîte
+                        ctx.fillStyle = color;
+                        ctx.font = "16px Arial";
+                        ctx.fillText(`${prediction.class} (${prediction.confidence})`, x, y - 10); // Texte
+                    });
+
+                    // Afficher les prédictions
+                    predictionsList.innerHTML = data.predictions.map(prediction => `
+                        <li class="list-group-item"><strong>${prediction.class}</strong>: Confidence ${prediction.confidence}</li>
+                    `).join('');
+
+                    // Afficher les risques
+                    risksList.innerHTML = data.risks.map(risk => `
+                        <li class="list-group-item">${risk}</li>
+                    `).join('');
+                } else {
+                    const error = await response.json();
+                    alert("Error: " + error.error);
+                }
+            } catch (err) {
+                alert("An error occurred: " + err.message);
+            }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
